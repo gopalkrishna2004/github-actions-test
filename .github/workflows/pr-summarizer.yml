@@ -1,3 +1,129 @@
+# name: PR Code Summarizer
+# on:
+#   pull_request:
+#     types: [opened, synchronize]
+
+# jobs:
+#   summarize:
+#     runs-on: ubuntu-latest
+#     permissions:
+#       pull-requests: write
+#       contents: read
+    
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
+#         with:
+#           fetch-depth: 0
+      
+#       - name: Setup Node.js
+#         uses: actions/setup-node@v4
+#         with:
+#           node-version: '18'
+      
+#       - name: Install dependencies
+#         run: |
+#           npm init -y
+#           npm install @google/generative-ai
+      
+#       - name: Generate PR Summary
+#         env:
+#           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+#           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#         run: |
+#           cat > summarizer.js << 'EOF'
+#           const { GoogleGenerativeAI } = require('@google/generative-ai');
+#           const { execSync } = require('child_process');
+#           const fs = require('fs');
+
+#           async function main() {
+#             try {
+#               // Initialize Gemini AI
+#               const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+#               const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+#               // Get PR information
+#               const prNumber = process.env.GITHUB_EVENT_PATH ? 
+#                 JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8')).pull_request.number : 
+#                 process.env.PR_NUMBER;
+              
+#               const baseSha = process.env.GITHUB_BASE_REF || 'main';
+#               const headSha = process.env.GITHUB_HEAD_REF || process.env.GITHUB_SHA;
+
+#               // Get the diff
+#               const diffOutput = execSync(`git diff origin/${baseSha}...HEAD --name-status`, { encoding: 'utf8' });
+#               const detailedDiff = execSync(`git diff origin/${baseSha}...HEAD`, { encoding: 'utf8' });
+
+#               // Limit diff size to avoid token limits
+#               const maxDiffLength = 15000;
+#               const truncatedDiff = detailedDiff.length > maxDiffLength ? 
+#                 detailedDiff.substring(0, maxDiffLength) + '\n\n[... diff truncated due to length ...]' : 
+#                 detailedDiff;
+
+#               // Create prompt for Gemini
+#               const prompt = `
+#               Please analyze this pull request and provide a comprehensive summary:
+
+#               ## Changed Files:
+#               ${diffOutput}
+
+#               ## Code Changes:
+#               \`\`\`diff
+#               ${truncatedDiff}
+#               \`\`\`
+
+#               Please provide:
+#               1. **Summary**: A brief overview of what this PR does
+#               2. **Key Changes**: List the main modifications made
+#               3. **Files Modified**: Categorize changes by file type/purpose
+#               4. **Potential Impact**: Assess the scope and risk level of changes
+#               5. **Review Focus**: Suggest what reviewers should pay attention to
+
+#               Keep the summary concise but informative, focusing on the business logic and technical changes.
+#               `;
+
+#               // Generate summary using Gemini
+#               const result = await model.generateContent(prompt);
+#               const summary = result.response.text();
+
+#               // Format the comment
+#               const comment = `## 🤖 AI Code Summary
+
+#               ${summary}
+
+#               ---
+#               *This summary was generated automatically using Gemini AI. Please review the actual code changes for accuracy.*`;
+
+#               // Post comment to PR
+#               const { Octokit } = require("@octokit/rest");
+#               const octokit = new Octokit({
+#                 auth: process.env.GITHUB_TOKEN,
+#               });
+
+#               const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
+
+#               await octokit.rest.issues.createComment({
+#                 owner,
+#                 repo,
+#                 issue_number: prNumber,
+#                 body: comment,
+#               });
+
+#               console.log('Summary posted successfully!');
+
+#             } catch (error) {
+#               console.error('Error generating summary:', error);
+#               process.exit(1);
+#             }
+#           }
+
+#           main();
+#           EOF
+
+#           npm install @octokit/rest
+#           node summarizer.js
+
+
 name: PR Code Summarizer
 on:
   pull_request:
@@ -31,10 +157,26 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Create package.json with ES module support
+          cat > package.json << 'EOF'
+          {
+            "name": "pr-summarizer",
+            "version": "1.0.0",
+            "type": "module",
+            "dependencies": {
+              "@google/generative-ai": "^0.17.1",
+              "@octokit/rest": "^20.0.2"
+            }
+          }
+          EOF
+
+          npm install
+
           cat > summarizer.js << 'EOF'
-          const { GoogleGenerativeAI } = require('@google/generative-ai');
-          const { execSync } = require('child_process');
-          const fs = require('fs');
+          import { GoogleGenerativeAI } from '@google/generative-ai';
+          import { Octokit } from "@octokit/rest";
+          import { execSync } from 'child_process';
+          import fs from 'fs';
 
           async function main() {
             try {
@@ -95,7 +237,6 @@ jobs:
               *This summary was generated automatically using Gemini AI. Please review the actual code changes for accuracy.*`;
 
               // Post comment to PR
-              const { Octokit } = require("@octokit/rest");
               const octokit = new Octokit({
                 auth: process.env.GITHUB_TOKEN,
               });
@@ -120,5 +261,4 @@ jobs:
           main();
           EOF
 
-          npm install @octokit/rest
           node summarizer.js
