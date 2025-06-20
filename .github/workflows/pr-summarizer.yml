@@ -182,7 +182,7 @@ jobs:
             try {
               // Initialize Gemini AI
               const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-              const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+              const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
               // Get PR information
               const prNumber = process.env.GITHUB_EVENT_PATH ? 
